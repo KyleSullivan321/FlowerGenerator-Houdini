@@ -1,0 +1,27 @@
+// Crossing classifier (Run Over: Points) on Intersection Analysis output.
+// Input 1 is the triangulated head. Used by tests/intersection_test.py and
+// tools/debug_crossings.py.
+// Both surfaces pass through a crossing point: the nearest primitive, and the
+// nearest one with a different name.
+i@crossing = 0;
+int pa, pb;
+vector uv;
+float da = xyzdist(1, "", v@P, pa, uv);
+string na = prim(1, "name", pa);
+float db = xyzdist(1, "* ^@name=" + na, v@P, pb, uv);
+if (da > 1e-6 || db > 1e-6) return;
+string pta = prim(1, "part", pa), ptb = prim(1, "part", pb);
+int blade_a = pta == "petal" || pta == "sepal";
+int blade_b = ptb == "petal" || ptb == "sepal";
+if (!blade_a && !blade_b) return;
+// Skip the attachment zone of any blade involved.
+int pair[] = array(pa, pb);
+foreach (int pr; pair) {
+    string part = prim(1, "part", pr);
+    if (part != "petal" && part != "sepal") continue;
+    float s = 1;
+    foreach (int pt; primpoints(1, pr)) s = min(s, point(1, "blade_s", pt));
+    if (s < 0.15) return;
+}
+i@crossing = 1;
+s@pair = pta < ptb ? pta + "-" + ptb : ptb + "-" + pta;

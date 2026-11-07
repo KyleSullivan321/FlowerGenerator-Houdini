@@ -1,0 +1,124 @@
+// Leaves (Run Over: Detail). Input 1 is the stem, which carries its centreline
+// as the detail arrays stem_P, stem_T, stem_N and stem_r.
+// Simple leaves are one blade. Compound leaves (Leaflets 3, 5, 7...) are a thin
+// rachis with leaflet pairs and a terminal leaflet, as on roses.
+#include "blade.h"
+#include "anim.h"
+
+if (chi("../enable_leaves") == 0 || chi("../enable_stem") == 0) return;
+
+vector C[]  = detail(1, "stem_P");
+vector Tn[] = detail(1, "stem_T");
+vector Nn[] = detail(1, "stem_N");
+float  Rk[] = detail(1, "stem_r");
+int S = len(C) - 1;
+if (S < 1) return;
+
+int n        = max(0, chi("../leaf_count"));
+int arr      = chi("../leaf_arrangement");    // 0 alternate, 1 opposite, 2 whorled, 3 spiral
+int per      = arr == 1 ? 2 : (arr == 2 ? 3 : 1);
+int nodes    = (n + per - 1) / per;
+int seed     = chi("../seed");
+int leaflets = max(1, chi("../leaflets"));
+int rows     = max(2, chi("../leaf_rows"));
+int cols     = max(2, chi("../leaf_cols"));
+float jit    = chf("../leaf_jitter");
+vector col0  = chv("../leaf_color");
+vector col1  = chv("../leaf_color_tip");
+// Grow With Bloom: young leaves are smaller and folded up against the stem; eased with the bloom.
+float lg   = smooth(0, 1, bloom_progress(@Frame));
+float young = clamp(chf("../leaf_grow"), 0, 1) * (1 - lg);
+
+for (int i = 0; i < n; i++) {
+    int node = i / per, k = i % per;
+    float fs = nodes > 1 ? node / (nodes - 1.0) : 0.5;
+    float h1 = rand(set(seed, i, 11.1));
+    float h2 = rand(set(seed, i, 12.7));
+    float h3 = rand(set(seed, i, 13.3));
+    float s = clamp(lerp(chf("../leaf_start"), chf("../leaf_end"), fs) + jit * 0.04 * (h1 * 2 - 1), 0, 1);
+
+    float az;
+    if (arr == 0)      az = node * radians(chf("../leaf_divergence"));
+    else if (arr == 1) az = node * PI * 0.5 + k * PI;
+    else if (arr == 2) az = node * PI / 3 + k * 2 * PI / 3;
+    else               az = node * radians(137.508);
+    float h4 = rand(set(seed, i, 17.9));
+    az += radians(chf("../leaf_rotate")) + radians(chf("../leaf_rotate_random")) * (h4 * 2 - 1) + radians(20) * jit * (h2 * 2 - 1);
+
+    float x = s * S;
+    int k0 = min(int(floor(x)), S - 1);
+    float fr = x - k0;
+    vector P = lerp(C[k0], C[k0 + 1], fr);
+    vector T = normalize(lerp(Tn[k0], Tn[k0 + 1], fr));
+    vector N = lerp(Nn[k0], Nn[k0 + 1], fr);
+    N = normalize(N - T * dot(N, T));
+    vector B = cross(T, N);
+    vector R = cos(az) * N + sin(az) * B;
+    float r = lerp(Rk[k0], Rk[k0 + 1], fr);
+    float size = chramp("../leaf_size_ramp", fs) * (1 + jit * 0.2 * (h3 * 2 - 1)) * (1 - 0.6 * young);
+    vector base = P + R * r * 0.85;
+
+    float sh[] = blade_defaults();
+    sh[B_L]       = chf("../leaf_length") * size;
+    sh[B_HW]      = 0.5 * chf("../leaf_width") * size;
+    sh[B_ALPHA]   = radians(chf("../leaf_angle")) * (1 - 0.7 * young);
+    sh[B_BEND]    = radians(chf("../leaf_bend"));
+    sh[B_TIPCURL] = radians(chf("../leaf_tip_curl"));
+    sh[B_TCS]     = 0.6;
+    sh[B_CUP]     = radians(chf("../leaf_cup"));
+    sh[B_FOLD]    = lerp(chf("../leaf_fold"), 1.0, young);
+    sh[B_SERR]    = chf("../leaf_serration");
+    sh[B_SERRF]   = chf("../leaf_teeth");
+    sh[B_RUFFLE]  = chf("../leaf_ruffle");
+    sh[B_RFREQ]   = 4;
+    sh[B_TWIST]   = radians(chf("../leaf_twist")) * (h2 * 2 - 1);
+    sh[B_SEED]    = i + 31;
+
+    int prims[];
+    if (leaflets <= 1) {
+        prims = build_blade(base, R, T, sh, rows, cols, "../leaf_width_ramp", "", col0, col1, 1.0);
+    } else {
+        // Rachis: same spine law as a blade, as a thin tube.
+        int M = 16;
+        float Lr = sh[B_L];
+        vector rp[];
+        vector tau[], up[];
+        vector cur = base;
+        for (int m = 0; m <= M; m++) {
+            float u = m / float(M);
+            float ang = sh[B_ALPHA] + sh[B_BEND] * u;
+            append(rp, cur);
+            append(tau, sin(ang) * R + cos(ang) * T);
+            append(up, -cos(ang) * R + sin(ang) * T);
+            cur += (sin(ang) * R + cos(ang) * T) * (Lr / M);
+        }
+        prims = build_tube(rp, r * 0.35, r * 0.15, 5, col0 * 0.8, col0 * 0.8);
+        vector W = normalize(cross(R, T));
+        int pairs = (leaflets - 1) / 2;
+        float ls = chf("../leaflet_scale");
+        float la = radians(chf("../leaflet_angle"));
+        for (int q = 0; q <= pairs * 2; q++) {
+            int pair = q / 2;
+            int terminal = q == pairs * 2;
+            float side = (q % 2) ? -1 : 1;
+            float u = terminal ? 1 : lerp(0.3, 0.85, pairs > 1 ? pair / (pairs - 1.0) : 0.5);
+            int m = int(rint(u * M));
+            vector dir = terminal ? tau[m] : normalize(cos(la) * tau[m] + side * sin(la) * W);
+            float sz = terminal ? 1.1 : lerp(0.75, 1.0, u);
+            float lsh[] = sh;
+            lsh[B_L]     = sh[B_L] * ls * sz;
+            lsh[B_HW]    = sh[B_HW] * sz;
+            lsh[B_ALPHA] = radians(80);
+            lsh[B_BEND]  = radians(chf("../leaf_tip_curl")) * 0.5 + radians(10);
+            lsh[B_SEED]  = i * 13 + q;
+            lsh[B_TWIST] = radians(8) * side;
+            int lp[] = build_blade(rp[m], dir, up[m], lsh, rows, cols, "../leaf_width_ramp", "",
+                                   col0, col1, 1.0);
+            append(prims, lp);
+        }
+    }
+    foreach (int pr; prims) {
+        setprimattrib(0, "name", pr, sprintf("leaf_%d", i));
+        setprimattrib(0, "part", pr, "leaf");
+    }
+}

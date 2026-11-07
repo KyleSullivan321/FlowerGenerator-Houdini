@@ -1,0 +1,9 @@
+{
+    "env": [
+        {
+            "FLOWERGEN": "C:/path/to/FlowerGenerator-Houdini"
+        }
+    ],
+    "path": "$FLOWERGEN",
+    "load_package_once": true
+}

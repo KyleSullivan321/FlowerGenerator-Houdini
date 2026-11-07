@@ -1,0 +1,60 @@
+// Center (Run Over: Detail, no input), in head space.
+// A receptacle dome that covers the petal bases. With Center Type set to Disc
+// Florets, the dome is covered with a golden spiral of florets (daisy, sunflower).
+#include "blade.h"
+#include "anim.h"
+
+if (chi("../enable_center") == 0) return;
+
+float hr  = chf("../head_radius");
+float rc  = hr * chf("../center_size");
+float hc  = rc * chf("../center_height");
+float off = chf("../center_offset") * hr;
+vector col = chv("../center_color");
+int disc  = chi("../center_type") == 1;
+int sides = 24, lat = 8;
+
+int ids[];
+for (int i = 0; i <= lat; i++) {
+    float th = (PI * 0.62) * i / lat;      // a little past the equator to tuck under the petals
+    for (int j = 0; j < sides; j++) {
+        float ph = 2 * PI * j / sides;
+        vector P = set(rc * sin(th) * cos(ph), off + hc * cos(th), rc * sin(th) * sin(ph));
+        int pt = addpoint(0, P);
+        setpointattrib(0, "Cd", pt, disc ? chv("../center_color_inner") * 0.6 : col);
+        setpointattrib(0, "uv", pt, set(j / float(sides), i / float(lat), 0));
+        append(ids, pt);
+    }
+}
+for (int i = 0; i < lat; i++) {
+    for (int j = 0; j < sides; j++) {
+        int j1 = (j + 1) % sides;
+        int pr = addprim(0, "poly", ids[i * sides + j], ids[i * sides + j1],
+                         ids[(i + 1) * sides + j1], ids[(i + 1) * sides + j]);
+        setprimattrib(0, "name", pr, "receptacle");
+        setprimattrib(0, "part", pr, "center");
+    }
+}
+
+if (disc) {
+    int nf = max(1, chi("../disc_florets"));
+    float fsz = chf("../floret_size") * rc * 1.7 / sqrt(nf);
+    float g = layer_progress(bloom_progress(@Frame), 1.0);
+    vector cin = chv("../center_color_inner");
+    for (int k = 0; k < nf; k++) {
+        float fr = sqrt((k + 0.5) / nf);
+        float r = rc * fr * 0.98;
+        float ph = k * radians(137.508);
+        float cy = sqrt(max(0, 1 - fr * fr * 0.96));
+        vector P = set(r * cos(ph), off + hc * cy, r * sin(ph));
+        vector nrm = normalize(set(P.x / (rc * rc), (P.y - off) / max(1e-6, hc * hc), P.z / (rc * rc)));
+        // Florets open from the rim inward as the flower opens.
+        float open = smooth(0, 0.3, g - (1 - fr) * 0.7);
+        vector c = lerp(cin, col, open);
+        int fp[] = build_blob(P + nrm * fsz * 0.3, nrm, fsz * lerp(0.75, 1.0, open), 1.25, 6, c);
+        foreach (int pr; fp) {
+            setprimattrib(0, "name", pr, "florets");
+            setprimattrib(0, "part", pr, "floret");
+        }
+    }
+}

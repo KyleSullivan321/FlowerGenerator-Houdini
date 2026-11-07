@@ -1,0 +1,9 @@
+// Rank (Run Over: Primitives), in head space.
+// Stacking order for the de-intersect pass: a blade must stay outside every
+// surface of higher rank. Sepals are outermost (each its own layer), then petals from the outermost
+// (order 0) inward. Everything else (receptacle, florets, stamens, pistil) is
+// a fixed obstacle that never moves.
+
+if (s@part == "sepal")      i@rank = -1 - i@order;     // each sepal its own layer
+else if (s@part == "petal") i@rank = i@order;
+else                        i@rank = 1000000;

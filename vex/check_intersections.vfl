@@ -1,0 +1,20 @@
+// Intersection check (Run Over: Points). Not part of the output: tests cook this
+// node to count blade points still on the wrong side of an inner surface.
+// Writes the point group "penetrating" and the detail attribute "penetrating_points".
+
+if (length(v@nout) < 0.5) return;
+int myprims[] = pointprims(0, @ptnum);
+int myrank = prim(0, "rank", myprims[0]);
+float reach = 0.5 * chf("../petal_length");
+float tol = chf("../deintersect_gap") * 0.25;
+
+vector hp[], huv[];
+int hpr[];
+int n = intersect_all(0, "", v@P + v@nout * tol, v@nout * reach, hp, hpr, huv, 1e-6, -1);
+for (int i = 0; i < n; i++) {
+    if (prim(0, "rank", hpr[i]) > myrank && f@blade_s > 0.12) {
+        setpointgroup(0, "penetrating", @ptnum, 1);
+        setdetailattrib(0, "penetrating_points", 1, "add");
+        break;
+    }
+}

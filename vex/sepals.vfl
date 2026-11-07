@@ -1,0 +1,54 @@
+// Sepals (Run Over: Detail, no input), in head space.
+// Green blades under the petals. They wrap the bud and open ahead of the petals.
+#include "blade.h"
+#include "anim.h"
+
+if (chi("../enable_sepals") == 0) return;
+
+int   n    = max(1, chi("../sepal_count"));
+int   seed = chi("../seed");
+float rh   = chf("../head_radius");
+float bs   = smooth(0, max(0.05, chf("../sepal_lead")), bloom_progress(@Frame));
+float az0  = radians(chf("../sepal_offset"));
+
+for (int i = 0; i < n; i++) {
+    float h1 = rand(set(seed, i, 5.5));
+    float h2 = rand(set(seed, i, 6.1));
+    float az = az0 + 2 * PI * i / n + radians(8) * (h1 * 2 - 1);
+    vector R = set(cos(az), 0, sin(az));
+
+    float sh[] = blade_defaults();
+    sh[B_L]      = chf("../sepal_length") * (1 + 0.1 * (h2 * 2 - 1)) * lerp(chf("../sepal_bud_length"), 1, bs);
+    sh[B_HW]     = 0.5 * chf("../sepal_width") * lerp(chf("../sepal_bud_width"), 1, bs);
+    sh[B_ALPHA]  = radians(lerp(chf("../sepal_closed_angle"), chf("../sepal_open_angle"), bs));
+    sh[B_BEND]   = radians(lerp(chf("../sepal_bend_closed"), chf("../sepal_bend_open"), bs));
+    sh[B_CUP]    = radians(lerp(chf("../sepal_cup_closed"), chf("../sepal_cup_open"), bs));
+    sh[B_TROUND] = 0.1;
+    sh[B_FOLD]   = 0.15;
+    sh[B_RUFFLE] = 0.01;
+    sh[B_RFREQ]  = 3;
+    sh[B_TWIST]  = radians(10) * (h1 * 2 - 1);
+    sh[B_SEED]   = i + seed * 7;
+    sh[B_WRAP]   = chf("../bud_wrap") * (1 - bs);
+    // Bud shell: each sepal on its own shell just outside the outermost petal's,
+    // released as the sepals open.
+    float gap = detail(1, "shell_gap", 0);
+    float g = bloom_progress(@Frame);
+    shell_shape(sh, g, detail(1, "shell_r0_open", rh));
+    sh[B_SFILL] = 0;
+    sh[B_SHELL] = chf("../bud_shell") * (1 - smooth(0, max(0.02, chf("../bud_release")), bs));
+    sh[B_SD]    = max(1, chf("../sepal_radius")) / pow(1 - max(gap, 0.01), i + 1)
+                * lerp(1, detail(1, "shell_open_outer", 1), cup_progress(g));
+    sh[B_SYO]   = detail(1, "shell_center", 0);
+
+    vector base = R * rh * chf("../sepal_radius") + set(0, -0.15 * rh, 0);
+    int prims[] = build_blade(base, R, {0, 1, 0}, sh, 12, 6, "../sepal_width_ramp", "",
+                              chv("../sepal_color"), chv("../sepal_color_tip"), 1.0);
+    foreach (int pr; prims) {
+        setprimattrib(0, "name", pr, sprintf("sepal_%d", i));
+        setprimattrib(0, "part", pr, "sepal");
+        setprimattrib(0, "order", pr, i);
+        setprimattrib(0, "shell", pr, sh[B_SHELL]);
+        setprimattrib(0, "open", pr, bs);   // the de-intersect pass fades out on opened sepals
+    }
+}

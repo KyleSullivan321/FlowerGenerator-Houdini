@@ -1,0 +1,92 @@
+// Stem (Run Over: Detail, no input).
+// Builds the stem centreline, sweeps it into a tube, and stores the head
+// transform at the tip (detail matrix "head_xform") plus the centreline
+// (detail arrays "stem_P", "stem_T") for leaves and thorns.
+
+int   S     = max(4, chi("../stem_segments"));
+int   sides = max(3, chi("../stem_sides"));
+float H     = chf("../stem_height");
+float bend  = radians(chf("../stem_bend"));
+float bdir  = radians(chf("../stem_bend_dir"));
+float nod   = radians(chf("../head_nod"));
+float wob   = chf("../stem_wobble");
+float wfrq  = chf("../stem_wobble_freq");
+float rad   = chf("../stem_radius");
+int   seed  = chi("../seed");
+vector col  = chv("../stem_color");
+
+if (chi("../enable_stem") == 0) {
+    matrix m0 = ident();
+    setdetailattrib(0, "head_xform", m0);
+    return;
+}
+
+vector Y = {0, 1, 0};
+vector D = set(cos(bdir), 0, sin(bdir));
+
+vector C[];
+vector cur = {0, 0, 0};
+for (int k = 0; k <= S; k++) {
+    float s = k / float(S);
+    float ang = bend * s + nod * pow(smooth(0.55, 1, s), 2);
+    vector w = vector(noise(set(s * wfrq, seed * 0.37, 1.3))) - {0.5, 0.5, 0.5};
+    w.y = 0;
+    append(C, cur + w * 2 * wob * H * smooth(0, 0.4, s));
+    cur += (sin(ang) * D + cos(ang) * Y) * (H / S);
+}
+
+// Tangents and a parallel-transported frame.
+vector Tn[], Nn[];
+resize(Tn, S + 1);
+resize(Nn, S + 1);
+for (int k = 0; k <= S; k++) {
+    vector d = k < S ? C[k + 1] - C[k] : C[k] - C[k - 1];
+    if (k > 0 && k < S) d = C[k + 1] - C[k - 1];
+    Tn[k] = normalize(d);
+}
+vector n0 = normalize(cross(Tn[0], {0, 0, 1}));
+if (length(cross(Tn[0], {0, 0, 1})) < 1e-4) n0 = {1, 0, 0};
+Nn[0] = n0;
+for (int k = 1; k <= S; k++) {
+    vector b = cross(Nn[k - 1], Tn[k]);
+    Nn[k] = normalize(cross(Tn[k], b));
+}
+
+float Rk[];
+resize(Rk, S + 1);
+int ring[];
+for (int k = 0; k <= S; k++) {
+    float s = k / float(S);
+    float r = rad * chramp("../stem_radius_ramp", s);
+    Rk[k] = r;
+    vector B = cross(Tn[k], Nn[k]);
+    for (int j = 0; j < sides; j++) {
+        float ph = 2 * PI * j / sides;
+        int pt = addpoint(0, C[k] + r * (cos(ph) * Nn[k] + sin(ph) * B));
+        setpointattrib(0, "uv", pt, set(j / float(sides), s * H / max(1e-4, 2 * PI * rad), 0));
+        setpointattrib(0, "Cd", pt, col);
+        append(ring, pt);
+    }
+}
+for (int k = 0; k < S; k++) {
+    for (int j = 0; j < sides; j++) {
+        int j1 = (j + 1) % sides;
+        int pr = addprim(0, "poly", ring[k * sides + j], ring[k * sides + j1],
+                         ring[(k + 1) * sides + j1], ring[(k + 1) * sides + j]);
+        setprimattrib(0, "name", pr, "stem");
+        setprimattrib(0, "part", pr, "stem");
+    }
+}
+
+vector Tt = Tn[S];
+vector Xh = normalize(Nn[S]);
+vector Zh = normalize(cross(Xh, Tt));
+matrix m = set(Xh.x, Xh.y, Xh.z, 0,
+               Tt.x, Tt.y, Tt.z, 0,
+               Zh.x, Zh.y, Zh.z, 0,
+               C[S].x, C[S].y, C[S].z, 1);
+setdetailattrib(0, "head_xform", m);
+setdetailattrib(0, "stem_P", C);
+setdetailattrib(0, "stem_T", Tn);
+setdetailattrib(0, "stem_N", Nn);
+setdetailattrib(0, "stem_r", Rk);

@@ -1,0 +1,48 @@
+// Petal build (Run Over: Points, one point per petal).
+// Grows a blade from each layout point with the pose from petal_pose,
+// then removes the layout point.
+#include "blade.h"
+#include "anim.h"
+
+float sh[] = blade_defaults();
+sh[B_L]       = chf("../petal_length") * f@scale * f@lenscale;
+sh[B_HW]      = 0.5 * chf("../petal_width") * f@scale;
+sh[B_ALPHA]   = radians(f@alpha);
+sh[B_BEND]    = radians(f@bend);
+sh[B_TIPCURL] = radians(f@tipcurl);
+sh[B_TCS]     = clamp(chf("../tip_curl_start"), 0, 0.99);
+sh[B_CUP]     = radians(f@cup);
+sh[B_ROLL]    = f@roll;
+sh[B_TROUND]  = chf("../tip_round");
+sh[B_NOTCH]   = chf("../tip_notch");
+sh[B_NOTW]    = chf("../tip_notch_width");
+sh[B_RUFFLE]  = chf("../ruffle") * f@detail;
+sh[B_RFREQ]   = chf("../ruffle_freq");
+sh[B_TWIST]   = radians(chf("../jitter_twist")) * (rand(f@pseed + 4.4) * 2 - 1) * f@detail;
+sh[B_SEED]    = f@pseed;
+sh[B_WRAP]    = f@wrap;
+sh[B_NEST]    = f@nest;
+
+// Bud shell: each petal lies on its own shell, the full-size bud (opening into
+// the Open Cup) scaled by shell_scale from petal_layout.
+float g = bloom_progress(@Frame);
+shell_shape(sh, g, detail(0, "shell_r0_open", 0));
+sh[B_SHELL] = f@shell;
+sh[B_SD]    = lerp(f@shell_scale, f@shell_scale_open, cup_progress(g));
+sh[B_SYO]   = detail(0, "shell_center", 0);
+
+vector R = set(cos(f@azimuth), 0, sin(f@azimuth));
+int prims[] = build_blade(v@P, R, {0, 1, 0}, sh,
+                          max(2, chi("../petal_rows")), max(2, chi("../petal_cols")),
+                          "../width_ramp", "../cup_ramp",
+                          chv("../color_base"), chv("../color_tip"), max(0.05, chf("../color_gamma")));
+foreach (int pr; prims) {
+    setprimattrib(0, "name", pr, sprintf("petal_%d", i@petal_id));
+    setprimattrib(0, "part", pr, "petal");
+    setprimattrib(0, "petal_id", pr, i@petal_id);
+    setprimattrib(0, "order", pr, i@order);
+    setprimattrib(0, "layerf", pr, f@layerf);
+    setprimattrib(0, "bloom", pr, f@bloom);
+    setprimattrib(0, "shell", pr, f@shell);
+}
+removepoint(0, @ptnum);

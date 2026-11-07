@@ -1,0 +1,47 @@
+// Petal pose (Run Over: Points, one point per petal).
+// Turns the global bloom progress into each petal's own pose.
+// Outer petals start first and every petal uses the same timing curve,
+// so an outer petal is never less open than the petals inside it.
+#include "anim.h"
+
+float b = layer_progress(bloom_progress(@Frame), f@layerf);
+
+// Peel: the hinge leads, the uncurl follows.
+float peel = clamp(chf("../peel"), 0, 0.9);
+float bh = clamp(b / (1 - peel * 0.5), 0, 1);
+float bc = clamp((b - peel * 0.5) / (1 - peel * 0.5), 0, 1);
+
+float ov = chf("../overshoot");
+float eh = smooth(0, 1, bh) + ov * pow(sin(PI * bh), 2) * bh;
+float ec = smooth(0, 1, bc);
+
+// Open With Growth (0 = the hinge/uncurl timing above): the opening angle, bend, cup and
+// length all follow one eased curve, so rays lengthen while they lower outward, with no
+// upright hold. The tip curl comes in only at the end.
+float ow = clamp(chf("../open_growth"), 0, 1);
+float u = lerp(smooth(0, 1, b), b, 0.4);   // one gentle ease, moving as soon as the rays emerge
+float ea = lerp(eh, u, ow);
+float eb = lerp(ec, u, ow);
+float el = lerp(smooth(0, 1, bh), u, ow);
+float et = lerp(ec, smooth(0.55, 1, b), ow);
+
+f@bloom = b;
+f@alpha = lerp(f@alpha_closed, f@alpha_open, ea);
+f@bend  = lerp(chf("../bend_closed"), chf("../bend_open"), eb);
+f@cup   = lerp(chf("../cup_closed"), chf("../cup_open"), eb);
+f@tipcurl = lerp(chf("../tip_curl_closed"), chf("../tip_curl"), et);
+f@roll  = chf("../edge_roll") * ec;
+f@lenscale = lerp(chf("../bud_length"), 1, el);
+// Bud nesting: in the bud every petal wraps round the axis, and inner petals are
+// pulled further in, so the closed bud is a set of nested shells.
+// Open Wrap and Open Nesting keep the inner layers cupped in the open flower.
+f@wrap = chf("../bud_wrap") * (1 - ec) + chf("../open_wrap") * pow(f@layerf, 1.5) * ec;
+f@nest = chf("../bud_nest") * f@layerf * (1 - eh) + chf("../open_nest") * f@layerf * eh;
+// Bud shell: each petal starts on its own nested shell and peels off it over the
+// first part of its opening (Shell Release). Held Layers stay on their shells,
+// which open into the Open Cup, so the cupped center cannot cross either.
+float hold = chf("../open_hold");
+int held = hold > 0 && f@layerf >= 1 - hold - 1e-6;
+f@shell = chf("../bud_shell") * (held ? 1.0 : 1 - smooth(0, max(0.02, chf("../bud_release")), bh));
+// Ruffle and twist grow as the petal opens, so the bud stays clean.
+f@detail = lerp(0.15, 1, ec);

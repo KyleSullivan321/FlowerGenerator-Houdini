@@ -1,0 +1,4 @@
+// Displacement the pass made at a bloom key: pass output (input 0) minus its input (input 1),
+// matched by point number. Zero if the point counts differ.
+v@dP = 0;
+if (npoints(1) == npoints(0)) v@dP = @P - point(1, "P", @ptnum);

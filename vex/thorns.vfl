@@ -1,0 +1,53 @@
+// Thorns (Run Over: Detail). Input 1 is the stem with its centreline arrays.
+// Each thorn is a curved, tapered cone with a broad base, hooked toward the ground.
+#include "blade.h"
+
+if (chi("../enable_thorns") == 0 || chi("../enable_stem") == 0) return;
+
+vector C[]  = detail(1, "stem_P");
+vector Tn[] = detail(1, "stem_T");
+vector Nn[] = detail(1, "stem_N");
+float  Rk[] = detail(1, "stem_r");
+int S = len(C) - 1;
+if (S < 1) return;
+
+int   n    = max(0, chi("../thorn_count"));
+int   seed = chi("../seed");
+float s0   = chf("../thorn_start");
+float s1   = chf("../thorn_end");
+float size = chf("../thorn_size");
+float wid  = chf("../thorn_width");
+float hook = chf("../thorn_hook");
+float lean = chf("../thorn_lean");
+
+for (int i = 0; i < n; i++) {
+    float h1 = rand(set(seed, i, 21.1));
+    float h2 = rand(set(seed, i, 22.3));
+    float h3 = rand(set(seed, i, 23.9));
+    float s = lerp(s0, s1, (i + h1) / n);
+    float az = 2 * PI * h2;
+
+    float x = s * S;
+    int k0 = min(int(floor(x)), S - 1);
+    float fr = x - k0;
+    vector P = lerp(C[k0], C[k0 + 1], fr);
+    vector T = normalize(lerp(Tn[k0], Tn[k0 + 1], fr));
+    vector N = lerp(Nn[k0], Nn[k0 + 1], fr);
+    N = normalize(N - T * dot(N, T));
+    vector R = cos(az) * N + sin(az) * cross(T, N);
+    float r = lerp(Rk[k0], Rk[k0 + 1], fr);
+
+    float L = size * (0.7 + 0.6 * h3);
+    vector dir = normalize(R - T * lean);
+    vector cl[];
+    int M = 6;
+    for (int m = 0; m <= M; m++) {
+        float u = m / float(M);
+        append(cl, P + R * r * 0.6 + dir * L * u - T * L * hook * u * u);
+    }
+    int prims[] = build_tube(cl, L * wid, L * 0.01, 6, chv("../thorn_color"), chv("../thorn_color_tip"));
+    foreach (int pr; prims) {
+        setprimattrib(0, "name", pr, sprintf("thorn_%d", i));
+        setprimattrib(0, "part", pr, "thorn");
+    }
+}

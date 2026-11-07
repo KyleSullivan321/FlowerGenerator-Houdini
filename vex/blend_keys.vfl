@@ -1,0 +1,13 @@
+// head(g) + lerp(pass(g0) - head(g0), pass(g1) - head(g1), t), matched by point number.
+// Input 0 is the head at the current bloom, inputs 1 and 2 carry the pass displacement dP at
+// the lower and upper bloom key. If the point counts differ between keys, the head is left
+// unresolved (the topology is constant across bloom, so this should not happen).
+float g = 0;
+if (chi("../anim_mode") == 0) g = chf("../bloom");
+else g = clamp((@Frame - chf("../bloom_start")) / max(1e-3, chf("../bloom_duration")), 0, 1) * chf("../bloom");
+g = clamp(g, 0, 1);
+float K = max(1, chi("../smooth_steps"));
+float g0 = floor(g * K + 1e-9) / K;
+float t = clamp((g - g0) * K, 0, 1);
+if (npoints(1) != npoints(0) || npoints(2) != npoints(0)) return;
+@P += lerp(point(1, "dP", @ptnum), point(2, "dP", @ptnum), t);

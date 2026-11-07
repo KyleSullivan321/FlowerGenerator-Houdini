@@ -1,0 +1,5 @@
+// Head to stem (Run Over: Points). Input 1 is the stem, which carries the
+// head transform at its tip as the detail matrix "head_xform".
+
+matrix m = detail(1, "head_xform", 0);
+v@P *= m;

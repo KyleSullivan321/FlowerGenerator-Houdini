@@ -1,0 +1,38 @@
+= Flower Generator =
+
+#type: node
+#context: sop
+#internal: ksd::flower_generator::1.0
+#icon: SOP/lsystem
+
+"""Generates a complete flower, with a bloom you can scrub or time."""
+
+Pick a __Species__, press __Randomize__ for a variation, and set the bloom on
+the __Animation__ tab. Every other tab is optional depth.
+
+The bloom is calculated per frame, not simulated: any frame cooks on its own and
+nothing needs caching. Outer petals always lead the inner ones.
+
+All sizes are in metres.
+
+@parameters
+
+== Flower ==
+
+Species:
+    Loads a species preset into every tab. Change anything afterwards.
+
+Seed:
+    Variation within the species.
+
+== Animation ==
+
+Mode:
+    Bloom Slider lets you set or keyframe Bloom yourself. Timed Bloom opens the
+    flower between Start Frame and Start Frame plus Duration.
+
+Layer Stagger:
+    How much later each inner layer starts. Outer petals always lead.
+
+Peel:
+    How far the hinge leads the uncurl, for a peeling-open look.

@@ -1,0 +1,74 @@
+// Stamens and pistil (Run Over: Detail, no input), in head space.
+// Filaments rise from a ring on the receptacle, curl outward and end in anthers.
+// They grow with the innermost petals, so they never poke through the bud.
+#include "blade.h"
+#include "anim.h"
+
+float hr   = chf("../head_radius");
+float rc   = hr * chf("../center_size");
+float top  = chf("../center_offset") * hr + rc * chf("../center_height") * 0.85;
+float grow = lerp(0.35, 1.0, smooth(0, 1, layer_progress(bloom_progress(@Frame), 1.0)));
+int   seed = chi("../seed");
+vector Y = {0, 1, 0};
+
+if (chi("../enable_stamens")) {
+    int   n     = max(1, chi("../stamen_count"));
+    float ring  = rc * chf("../stamen_ring");
+    float len   = chf("../stamen_length");
+    float sprd  = radians(chf("../stamen_spread"));
+    float curl  = radians(chf("../stamen_curl"));
+    float fr    = chf("../filament_radius");
+    float asz   = chf("../anther_size");
+    for (int i = 0; i < n; i++) {
+        float h1 = rand(set(seed, i, 31.7));
+        float h2 = rand(set(seed, i, 32.9));
+        float az = i * radians(137.508);
+        float rr = ring * sqrt((i + 0.5) / n);
+        vector R = set(cos(az), 0, sin(az));
+        float L = len * grow * (1 + 0.15 * (h1 * 2 - 1));
+        vector cl[];
+        vector cur = R * rr + set(0, top, 0);
+        int M = 8;
+        float ang = 0;
+        for (int m = 0; m <= M; m++) {
+            float u = m / float(M);
+            ang = sprd * (0.6 + 0.4 * h2) + curl * u * u;
+            append(cl, cur);
+            cur += (sin(ang) * R + cos(ang) * Y) * (L / M);
+        }
+        int fp[] = build_tube(cl, fr, fr * 0.7, 5, chv("../stamen_color"), chv("../stamen_color"));
+        vector tip = cl[M];
+        vector tg = sin(ang) * R + cos(ang) * Y;
+        int ap[] = build_blob(tip + tg * asz * 0.8, tg, asz, 1.6, 8, chv("../anther_color"));
+        foreach (int pr; fp) {
+            setprimattrib(0, "name", pr, sprintf("stamen_%d", i));
+            setprimattrib(0, "part", pr, "stamen");
+        }
+        foreach (int pr; ap) {
+            setprimattrib(0, "name", pr, sprintf("stamen_%d", i));
+            setprimattrib(0, "part", pr, "anther");
+        }
+    }
+}
+
+if (chi("../enable_pistil")) {
+    float L = chf("../pistil_length") * grow;
+    float pr0 = chf("../pistil_radius");
+    vector cl[];
+    for (int m = 0; m <= 6; m++) {
+        append(cl, set(0, top + L * m / 6.0, 0));
+    }
+    int pp[] = build_tube(cl, pr0 * 1.3, pr0, 8, chv("../pistil_color"), chv("../pistil_color"));
+    int lobes = max(1, chi("../stigma_lobes"));
+    float ss = chf("../stigma_size");
+    for (int l = 0; l < lobes; l++) {
+        float az = 2 * PI * l / lobes;
+        vector d = lobes > 1 ? normalize(set(cos(az), 0.6, sin(az))) : Y;
+        int sp[] = build_blob(cl[6] + d * ss * 0.7, d, ss, 1.4, 8, chv("../stigma_color"));
+        append(pp, sp);
+    }
+    foreach (int pr; pp) {
+        setprimattrib(0, "name", pr, "pistil");
+        setprimattrib(0, "part", pr, "pistil");
+    }
+}

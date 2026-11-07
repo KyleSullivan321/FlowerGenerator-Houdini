@@ -1,0 +1,115 @@
+// Petal layout (Run Over: Detail).
+// One point per petal at its attachment on the receptacle, in head space:
+// the flower axis is +Y and the origin is the top of the stem.
+// order 0 is the outermost petal; layerf runs 0 (outer) to 1 (inner).
+
+int   arr   = chi("../arrangement");          // 0 golden spiral, 1 whorls, 2 ray rows
+int   seed  = chi("../seed");
+float r_out = chf("../head_radius");
+float r_in  = r_out * chf("../head_inner_radius");
+float rise  = chf("../head_rise");
+
+int whorls = max(1, chi("../whorls"));
+int per    = max(1, chi("../petals_per_whorl"));
+int rays   = max(1, chi("../ray_count"));
+int rows   = max(1, chi("../ray_rows"));
+
+int n = max(1, chi("../petal_count"));
+if (arr == 1) n = whorls * per;
+if (arr == 2) n = rays * rows;
+
+float div      = radians(chf("../divergence"));
+float woff     = radians(chf("../whorl_offset"));
+float jit_az   = radians(chf("../jitter_azimuth"));
+float jit_size = chf("../jitter_size");
+float jit_ang  = chf("../jitter_angle");
+
+float open_outer   = chf("../open_angle_outer");
+float open_inner   = chf("../open_angle_inner");
+float closed_outer = chf("../closed_angle_outer");
+float closed_inner = chf("../closed_angle_inner");
+
+float base_r[], layer_f[];
+for (int i = 0; i < n; i++) {
+    float f = 0, az = 0;
+    if (arr == 0) {
+        f  = n > 1 ? i / (n - 1.0) : 0;
+        az = i * div;
+    } else if (arr == 1) {
+        int k = i / per, j = i % per;
+        f  = whorls > 1 ? k / (whorls - 1.0) : 0;
+        az = 2 * PI * j / per + k * woff;
+    } else {
+        int k = i / rays, j = i % rays;
+        f  = rows > 1 ? k / (rows - 1.0) : 0;
+        az = 2 * PI * (j + 0.5 * k) / rays;
+    }
+    float h1 = rand(set(seed, i, 1.17));
+    float h2 = rand(set(seed, i, 2.31));
+    float h3 = rand(set(seed, i, 3.73));
+    az += jit_az * (h1 * 2 - 1);
+
+    float r0 = lerp(r_out, r_in, f);
+    append(base_r, r0);
+    append(layer_f, f);
+    float h0 = rise * pow(f, 1.5);
+    vector R = set(cos(az), 0, sin(az));
+    int pt = addpoint(0, r0 * R + set(0, h0, 0));
+
+    float sc = chramp("../size_ramp", f) * (1 + jit_size * (h2 * 2 - 1));
+    float ao = lerp(open_outer, open_inner, chramp("../open_ramp", f)) + jit_ang * (h3 * 2 - 1);
+    float ac = lerp(closed_outer, closed_inner, f);
+
+    setpointattrib(0, "petal_id", pt, i);
+    setpointattrib(0, "order", pt, i);
+    setpointattrib(0, "layerf", pt, f);
+    setpointattrib(0, "azimuth", pt, az);
+    setpointattrib(0, "scale", pt, max(0.01, sc));
+    setpointattrib(0, "alpha_open", pt, ao);
+    setpointattrib(0, "alpha_closed", pt, ac);
+    setpointattrib(0, "pseed", pt, rand(set(seed, i, 9.91)) * 100);
+}
+setdetailattrib(0, "petal_total", n);
+
+// Bud shell scale per petal (see bud_profile in blade.h): the bud scaled to the
+// petal's base radius, and always smaller than the shell outside it by the
+// Layer Gap plus the sag of a polygon edge across the petal, so even the flat
+// facets of neighbouring layers stay apart.
+float gap = clamp(chf("../bud_gap") + 2.0 * (1 - cos(2.8 / max(2, chi("../petal_cols")))), 0, 0.5);
+float prev = 1e9;
+float sb[];
+for (int i = 0; i < n; i++) {
+    float sc = min(base_r[i] / max(1e-6, r_out), prev * (1 - gap));
+    setpointattrib(0, "shell_scale", i, sc);
+    append(sb, sc);
+    prev = sc;
+}
+setdetailattrib(0, "shell_gap", gap);
+
+// Open shell scale: the same rule, with the outermost Held Layer (i0) on the
+// full-size Open Cup, whose base sits at that layer's attachment. Shells blend
+// from the bud scales to these; both shrink by the gap at every layer, so any
+// blend of the two does too and the shells stay nested while they open.
+float hold = chf("../open_hold");
+int i0 = n;
+for (int i = n - 1; i >= 0; i--) {
+    if (hold > 0 && layer_f[i] >= 1 - hold - 1e-6) i0 = i;
+}
+int ia = min(i0, n - 1);
+float so[];
+resize(so, n);
+so[ia] = 1;
+for (int i = ia + 1; i < n; i++) so[i] = min(base_r[i] / max(1e-6, base_r[ia]), so[i - 1] * (1 - gap));
+for (int i = ia - 1; i >= 0; i--) so[i] = so[i + 1] / (1 - gap);
+if (i0 == n) {
+    // No held layers: the shells keep their bud scales.
+    so = sb;
+}
+for (int i = 0; i < n; i++) setpointattrib(0, "shell_scale_open", i, so[i]);
+setdetailattrib(0, "shell_r0_open", i0 == n ? r_out : base_r[ia]);
+setdetailattrib(0, "shell_open_outer", so[0] / max(1e-6, sb[0]));
+// Every shell is scaled about the point where the line from the outer to the
+// inner attachment meets the axis, so shell bases follow the receptacle.
+// It stays below the top of the shell while the bud opens into the Open Cup.
+float hb = min(chf("../bud_height"), chf("../open_cup_height")) * chf("../petal_length");
+setdetailattrib(0, "shell_center", min(rise * r_out / max(1e-6, r_out - r_in), 0.6 * hb));

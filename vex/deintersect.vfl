@@ -1,0 +1,400 @@
+// De-intersect (Run Over: Detail), in head space, after "rank".
+//
+// Every part is seen from a point C on the axis: inside the receptacle for cupped
+// flowers, raised above the head (Viewpoint Height) for flat ones like daisies. A depth buffer over
+// directions (polar angle x azimuth) holds, for each direction, the farthest
+// surface found so far. Parts are processed from the innermost rank outward:
+// fixed parts (receptacle, florets, stamens, pistil) first, then petals from the
+// innermost to the outermost, then sepals. Each blade point that is not at least
+// `gap` beyond the buffer is pushed outward along its direction from C, the push
+// is smoothed over the blade, and the blade is then drawn into the buffer.
+// One pass, in order, so a pushed inner petal is already final when the petals
+// outside it are tested.
+
+#include "anim.h"
+#define MCAP 10
+
+// Spherical cell coordinates of a position: x = azimuth cell, y = polar cell, z = distance.
+function vector sph(vector p; vector c; int nt; int np) {
+    vector d = p - c;
+    float r = length(d);
+    float th = acos(clamp(d.y / max(r, 1e-9), -1, 1));
+    float ph = atan2(d.z, d.x);
+    return set((ph + PI) / (2 * PI) * np, th / PI * nt, r);
+}
+
+// Draw one triangle into the buffer (keeps the farthest distance per cell).
+function void raster(float E[]; vector a; vector b; vector c; int nt; int np) {
+    vector A = a, B = b, Cc = c;
+    // A triangle round a pole of the buffer (straight up or down from C) winds
+    // once round in azimuth and cannot be drawn in polar cells: fill the cap
+    // of cells round that pole instead.
+    float h = np * 0.5;
+    float d1 = B.x - A.x, d2 = Cc.x - B.x, d3 = A.x - Cc.x;
+    d1 -= np * rint(d1 / np);
+    d2 -= np * rint(d2 / np);
+    d3 -= np * rint(d3 / np);
+    if (abs(d1 + d2 + d3) > h) {
+        float r = max(A.z, max(B.z, Cc.z));
+        int top = A.y + B.y + Cc.y < 1.5 * nt;
+        int ya = top ? 0 : max(0, int(floor(min(A.y, min(B.y, Cc.y)))));
+        int yb = top ? min(nt - 1, int(floor(max(A.y, max(B.y, Cc.y))))) : nt - 1;
+        for (int y = ya; y <= yb; y++) {
+            for (int x = 0; x < np; x++) E[y * np + x] = max(E[y * np + x], r);
+        }
+        return;
+    }
+    float lo = min(A.x, min(B.x, Cc.x)), hi = max(A.x, max(B.x, Cc.x));
+    if (hi - lo > np * 0.5) {           // the triangle crosses the azimuth seam
+        if (A.x < np * 0.5) A.x += np;
+        if (B.x < np * 0.5) B.x += np;
+        if (Cc.x < np * 0.5) Cc.x += np;
+    }
+    int x0 = int(floor(min(A.x, min(B.x, Cc.x)))), x1 = int(floor(max(A.x, max(B.x, Cc.x))));
+    int y0 = max(0, int(floor(min(A.y, min(B.y, Cc.y))))), y1 = min(nt - 1, int(floor(max(A.y, max(B.y, Cc.y)))));
+    float den = (B.y - Cc.y) * (A.x - Cc.x) + (Cc.x - B.x) * (A.y - Cc.y);
+    if (abs(den) < 1e-9) {
+        float r = max(A.z, max(B.z, Cc.z));
+        for (int y = y0; y <= y1; y++) {
+            for (int x = x0; x <= x1; x++) {
+                int idx = y * np + x % np;
+                E[idx] = max(E[idx], r);
+            }
+        }
+        return;
+    }
+    // Barycentric weights are linear in the cell centre (px, py): w = a * px + b * py + c.
+    // Along a row each weight is linear in px, so the cells whose centres pass
+    // (all weights at least -0.02) form one span, and the distance is linear along it.
+    float a0 = (B.y - Cc.y) / den, b0 = (Cc.x - B.x) / den;
+    float a1 = (Cc.y - A.y) / den, b1 = (A.x - Cc.x) / den;
+    float c0 = -a0 * Cc.x - b0 * Cc.y, c1 = -a1 * Cc.x - b1 * Cc.y;
+    float a2 = -a0 - a1, b2 = -b0 - b1, c2 = 1 - c0 - c1;
+    float za = a0 * A.z + a1 * B.z + a2 * Cc.z, zb = b0 * A.z + b1 * B.z + b2 * Cc.z;
+    float zc = c0 * A.z + c1 * B.z + c2 * Cc.z;
+    for (int y = y0; y <= y1; y++) {
+        float py = y + 0.5;
+        float lo = x0 + 0.5, hi = x1 + 0.5;
+        float cw = b0 * py + c0 + 0.02;             // a0 * px + cw >= 0, likewise for 1 and 2
+        if (a0 > 0) lo = max(lo, -cw / a0); else if (a0 < 0) hi = min(hi, -cw / a0); else if (cw < 0) continue;
+        cw = b1 * py + c1 + 0.02;
+        if (a1 > 0) lo = max(lo, -cw / a1); else if (a1 < 0) hi = min(hi, -cw / a1); else if (cw < 0) continue;
+        cw = b2 * py + c2 + 0.02;
+        if (a2 > 0) lo = max(lo, -cw / a2); else if (a2 < 0) hi = min(hi, -cw / a2); else if (cw < 0) continue;
+        int xs = int(ceil(lo - 0.5)), xe = int(floor(hi - 0.5));
+        float r = za * (xs + 0.5) + zb * py + zc;
+        int rowi = y * np;
+        for (int x = xs; x <= xe; x++) {
+            int idx = rowi + x % np;
+            E[idx] = max(E[idx], r);
+            r += za;
+        }
+    }
+}
+
+// Draw a primitive (a fan of triangles, plus its corners so tiny parts still count).
+function void raster_prim(float E[]; vector S[]; int pr; int nt; int np) {
+    int pts[] = primpoints(0, pr);
+    int n = len(pts);
+    vector s0 = S[pts[0]];
+    for (int k = 0; k < n; k++) {
+        vector sk = S[pts[k]];
+        int idx = min(nt - 1, int(sk.y)) * np + min(np - 1, int(sk.x));
+        E[idx] = max(E[idx], sk.z);
+        if (k >= 2) raster(E, s0, S[pts[k - 1]], sk, nt, np);
+    }
+}
+
+// Cone dilation: the depth buffer T, inside the window x0..x1 (azimuth, 0 <= x0 < np,
+// may run past np) by y0..y1, is raised so that every cell holds at least the depth of
+// any cell in the window minus `L` per cell of distance (L1 distance: a running max
+// along the rows, then down the columns). This caps the slope of the buffer so a blade
+// point sliding over an edge sees the push grow gradually rather than jump.
+function void dilate(float T[]; int x0; int x1; int y0; int y1; int np; float L) {
+    for (int y = y0; y <= y1; y++) {
+        int base = y * np;
+        float run = 0;
+        for (int x = x0; x <= x1; x++) {
+            int i = base + (x >= np ? x - np : x);
+            run = max(T[i], run - L);
+            T[i] = run;
+        }
+        run = 0;
+        for (int x = x1; x >= x0; x--) {
+            int i = base + (x >= np ? x - np : x);
+            run = max(T[i], run - L);
+            T[i] = run;
+        }
+    }
+    for (int x = x0; x <= x1; x++) {
+        int xi = x >= np ? x - np : x;
+        float run = 0;
+        for (int y = y0; y <= y1; y++) {
+            run = max(T[y * np + xi], run - L);
+            T[y * np + xi] = run;
+        }
+        run = 0;
+        for (int y = y1; y >= y0; y--) {
+            run = max(T[y * np + xi], run - L);
+            T[y * np + xi] = run;
+        }
+    }
+}
+
+// How far each blade point must move out (away from c) to clear the buffer by `gap`.
+function float[] needs(int bp[]; vector P[]; float WS[]; float E[]; vector c; float gap; float pmax; int nt; int np; float sl; int wr) {
+    float need[];
+    resize(need, len(bp));
+    for (int i = 0; i < len(bp); i++) {
+        vector s = sph(P[bp[i]], c, nt, np);
+        int y = min(nt - 1, int(s.y));
+        float env = 0;
+        if (sl > 0) {
+            // Cone-weighted lookup: each cell near the point counts at its depth minus
+            // `sl` per cell of distance from the point, so the depth seen by a blade
+            // point changes by at most `sl` per cell it slides.
+            for (int dy = -wr; dy <= wr; dy++) {
+                int yy = y + dy;
+                if (yy < 0 || yy >= nt) continue;
+                float ddy = yy + 0.5 - s.y;
+                for (int dx = -wr; dx <= wr; dx++) {
+                    int xx = ((int(floor(s.x)) + dx) % np + np) % np;
+                    float ddx = floor(s.x) + dx + 0.5 - s.x;
+                    float e = E[yy * np + xx];
+                    if (e > 0) env = max(env, e - sl * max(0.0, sqrt(ddx * ddx + ddy * ddy) - 1.0));
+                }
+            }
+        } else {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    int yy = clamp(y + dy, 0, nt - 1);
+                    int xx = ((int(s.x) + dx) % np + np) % np;
+                    env = max(env, E[yy * np + xx]);
+                }
+            }
+        }
+        if (env > 0 && s.z < env + gap) {
+            need[i] = min(env + gap - s.z, pmax) * WS[bp[i]];
+        }
+    }
+    return need;
+}
+
+float hr    = chf("../head_radius");
+float rc    = hr * chf("../center_size");
+float cy    = chf("../center_offset") * hr + rc * chf("../center_height") * 0.5
+            + lerp(chf("../deintersect_center_bud"), chf("../deintersect_center"),
+                   smooth(0, max(1e-3, chf("../deintersect_center_end")), min(bloom_progress(@Frame), chf("../deintersect_center_hold")))) * chf("../petal_length");
+vector C    = set(0, cy, 0);
+float gap   = chf("../deintersect_gap");
+float pmax  = chf("../deintersect_reach") * chf("../petal_length");
+int   iters = chi("../deintersect_smooth");
+// The smoothing bump along one grid direction, (1 - x^2)^2 with x the distance
+// in cells over iters + 1, as a table.
+float K1[];
+for (int d = -iters; d <= iters; d++) {
+    float x = d / float(iters + 1);
+    append(K1, (1 - x * x) * (1 - x * x));
+}
+float amax  = radians(chf("../deintersect_angle"));
+float settle = chf("../sepal_settle");
+int   NT    = max(16, chi("../deintersect_res"));
+int   NP    = NT * 2;
+
+float E[], T[];
+resize(E, NT * NP);
+resize(T, NT * NP);
+float DSL = chf("../deintersect_dilate");
+float SLC = chf("../deintersect_cone");
+float SHW = chf("../deintersect_shell_fade");
+float cellw = chf("../petal_length") * PI / NT;
+float Ld = DSL * cellw;
+float SL = SLC * cellw;
+int WR = int(ceil(min(max(2.0, 0.6 * pmax / max(SL, 1e-9)), 10)));
+int mw = DSL > 0 ? int(min(ceil(0.6 * pmax / Ld), MCAP)) : 0;
+
+int npts = npoints(0);
+vector P[];
+resize(P, npts);
+// Blade grid row and column, columns per row, and how much of a push the point
+// takes (none at the base), read once into arrays for the loops below.
+int GI[], GJ[], GC[];
+float WS[];
+vector S[];
+resize(GI, npts);
+resize(GJ, npts);
+resize(GC, npts);
+resize(WS, npts);
+resize(S, npts);
+for (int i = 0; i < npts; i++) {
+    P[i] = point(0, "P", i);
+    GI[i] = point(0, "gi", i);
+    GJ[i] = point(0, "gj", i);
+    GC[i] = point(0, "gcols", i);
+    WS[i] = smooth(0, 0.12, point(0, "blade_s", i));
+}
+int moved[];
+resize(moved, npts);
+
+// Prims and points sorted by rank, innermost (highest rank) first.
+int nprims = nprimitives(0);
+int primrank[], prank[], loc[];
+resize(primrank, nprims);
+resize(prank, npts);
+resize(loc, npts);
+for (int pr = 0; pr < nprims; pr++) {
+    primrank[pr] = prim(0, "rank", pr);
+    foreach (int pt; primpoints(0, pr)) prank[pt] = primrank[pr];
+}
+// Only blades that have left their bud shells are tested, so nothing needs to be
+// drawn into the buffer after the outermost of them (the lowest rank).
+int lastfree = 1000000;
+for (int pr = 0; pr < nprims; pr++) {
+    if (primrank[pr] < lastfree && prim(0, "shell", pr) < 0.999) lastfree = primrank[pr];
+}
+int porder[] = reverse(argsort(primrank));
+int torder[] = reverse(argsort(prank));
+for (int i = 0; i < npts; i++) loc[i] = -1;
+
+int pi = 0, ti = 0;
+while (pi < nprims) {
+    int rk = primrank[porder[pi]];
+    int prims[];
+    while (pi < nprims && primrank[porder[pi]] == rk) {
+        append(prims, porder[pi]);
+        pi++;
+    }
+    int bp[];
+    while (ti < npts && prank[torder[ti]] == rk) {
+        loc[torder[ti]] = len(bp);
+        append(bp, torder[ti]);
+        ti++;
+    }
+    // A blade still fully on its bud shell is already clear of every other shell.
+    int onshell = len(prims) > 0 && prim(0, "shell", prims[0]) >= 0.999;
+    if (rk < 1000000 && !onshell) {
+        // Sepals that have finished opening are left alone (weight 1 -> 0 as `open` goes 0 -> 1),
+        // so the pass cannot make them jitter once the petals are still moving.
+        float fade = 1;
+        if (settle > 0 && prim(0, "part", prims[0]) == "sepal") fade = 1 - settle * prim(0, "open", prims[0]);
+        // A blade that has only just left its bud shell takes its push in gradually.
+        if (SHW > 0) fade *= 1 - smooth(1 - SHW, 1, prim(0, "shell", prims[0]));
+        float need[] = needs(bp, P, WS, E, C, gap, pmax, NT, NP, SL, WR);
+        if (fade < 1) for (int i = 0; i < len(need); i++) need[i] *= fade;
+
+        // First open the whole blade further on its hinge, which keeps its shape:
+        // the hinge runs across the base, and the angle is the largest need over
+        // the distance from the hinge, capped at Max Hinge Angle.
+        if (max(need) > 0 && amax > 0) {
+            int b0 = -1, b1 = -1;
+            foreach (int pt; bp) {
+                if (GI[pt] != 0) continue;
+                if (GJ[pt] == 0) b0 = pt;
+                if (GJ[pt] == GC[pt] - 1) b1 = pt;
+            }
+            if (b0 >= 0 && b1 >= 0 && distance(P[b0], P[b1]) > 1e-7) {
+                vector pivot = (P[b0] + P[b1]) * 0.5;
+                vector axis = normalize(P[b1] - P[b0]);
+                float ang = 0;
+                int worst = -1;
+                for (int i = 0; i < len(bp); i++) {
+                    if (need[i] <= 0) continue;
+                    vector v = P[bp[i]] - pivot;
+                    float d = length(v - axis * dot(v, axis));
+                    float a = need[i] / max(d, 1e-5);
+                    if (a > ang) {
+                        ang = a;
+                        worst = bp[i];
+                    }
+                }
+                ang = min(ang * 1.1, amax);
+                if (worst >= 0) {
+                    // Turn the way that takes the worst point away from C.
+                    vector v = P[worst] - pivot;
+                    vector plus = pivot + qrotate(quaternion(ang, axis), v);
+                    vector minus = pivot + qrotate(quaternion(-ang, axis), v);
+                    vector4 q = quaternion(distance(plus, C) >= distance(minus, C) ? ang : -ang, axis);
+                    foreach (int pt; bp) {
+                        P[pt] = pivot + qrotate(q, P[pt] - pivot);
+                        moved[pt] = 1;
+                    }
+                    need = needs(bp, P, WS, E, C, gap, pmax, NT, NP, SL, WR);
+                    if (fade < 1) for (int i = 0; i < len(need); i++) need[i] *= fade;
+                }
+            }
+        }
+        float push[] = need;
+        // Spread each push over the blade grid with a smooth bump of radius `iters`
+        // cells, keeping the largest value at every point: no point gets less than
+        // it needs, and the pushed region blends into the rest of the blade. The
+        // bump is (1 - x^2)^2 across times the same along, so the largest value
+        // over all pushes is found along the rows first and then down the columns.
+        int R = iters;
+        if (R > 0 && max(need) > 0) {
+            float H[];
+            resize(H, len(bp));
+            for (int i = 0; i < len(bp); i++) {
+                if (need[i] <= 0) continue;
+                int pt = bp[i];
+                int gj = GJ[pt];
+                for (int dj = max(-R, -gj); dj <= min(R, GC[pt] - 1 - gj); dj++) {
+                    int lq = loc[pt + dj];
+                    H[lq] = max(H[lq], need[i] * K1[dj + R]);
+                }
+            }
+            for (int i = 0; i < len(bp); i++) {
+                if (H[i] <= 0) continue;
+                int pt = bp[i];
+                int gi = GI[pt], gc = GC[pt];
+                for (int di = -R; di <= R; di++) {
+                    int q = pt + di * gc;
+                    if (q < 0 || q >= npts || loc[q] < 0 || GI[q] != gi + di) continue;
+                    int lq = loc[q];
+                    push[lq] = max(push[lq], H[i] * K1[di + R] * WS[q]);
+                }
+            }
+        }
+        for (int i = 0; i < len(bp); i++) {
+            if (push[i] > 0) {
+                P[bp[i]] += normalize(P[bp[i]] - C) * push[i];
+                moved[bp[i]] = 1;
+            }
+            loc[bp[i]] = -1;
+        }
+    }
+    if (rk > lastfree && DSL <= 0) {
+        foreach (int pt; bp) S[pt] = sph(P[pt], C, NT, NP);
+        foreach (int pr; prims) raster_prim(E, S, pr, NT, NP);
+    } else if (rk > lastfree) {
+        float xmin = 1e9, xmax = -1e9, ymin = 1e9, ymax = -1e9;
+        foreach (int pt; bp) {
+            S[pt] = sph(P[pt], C, NT, NP);
+            xmin = min(xmin, S[pt].x); xmax = max(xmax, S[pt].x);
+            ymin = min(ymin, S[pt].y); ymax = max(ymax, S[pt].y);
+        }
+        if (xmax - xmin > NP * 0.5) {
+            xmin = 1e9; xmax = -1e9;
+            foreach (int pt; bp) {
+                float sx = S[pt].x < NP * 0.5 ? S[pt].x + NP : S[pt].x;
+                xmin = min(xmin, sx); xmax = max(xmax, sx);
+            }
+        }
+        int wx0 = int(floor(xmin)) - mw, wx1 = int(floor(xmax)) + mw;
+        int wy0 = max(0, int(floor(ymin)) - mw), wy1 = min(NT - 1, int(floor(ymax)) + mw);
+        if (wx0 < 0) { wx0 += NP; wx1 += NP; }
+        if (wx1 - wx0 + 1 >= NP || xmax - xmin > NP * 0.5) { wx0 = 0; wx1 = NP - 1; wy0 = 0; wy1 = NT - 1; }
+        foreach (int pr; prims) raster_prim(T, S, pr, NT, NP);
+        dilate(T, wx0, wx1, wy0, wy1, NP, Ld);
+        for (int y = wy0; y <= wy1; y++) {
+            for (int x = wx0; x <= wx1; x++) {
+                int i = y * NP + (x >= NP ? x - NP : x);
+                E[i] = max(E[i], T[i]);
+                T[i] = 0;
+            }
+        }
+    }
+}
+
+for (int i = 0; i < npts; i++) {
+    if (moved[i]) setpointattrib(0, "P", i, P[i]);
+}
